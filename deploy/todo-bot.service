@@ -1,0 +1,17 @@
+[Unit]
+Description=Telegram ToDo Coach Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/apps/AI/ToDo
+Environment=PYTHONUNBUFFERED=1
+Environment=TODO_ENV_FILE=/root/.config/todo.env
+ExecStart=/apps/AI/ToDo/.venv/bin/python -m bot.main
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+

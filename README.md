@@ -9,6 +9,12 @@ This project provides a Telegram bot that helps you manage tasks with priorities
   - mark as done
   - delete
 - Daily automated check-ins.
+- Recurring weekend chores with confirmation flow:
+  - Clean bedroom and bathroom every 30 days
+  - Clean sheets every 21 days
+  - Water plants every 7 days
+  - Morning weekend reminders + end-of-day confirmation prompt
+  - If not confirmed done, chores keep showing on weekend days
 - Weekly review nudges inspired by:
   - *Getting Things Done* (capture + next actions + review)
   - *7 Habits* (goal alignment + important/not urgent)
@@ -43,6 +49,31 @@ For local MongoDB, ensure it is running and reachable at your configured URI.
 
 ## 3) Configure environment
 
+Preferred (your requested setup):
+
+```bash
+mkdir -p ~/.config
+nano ~/.config/todo.env
+```
+
+Paste this template and fill real values:
+
+```env
+TELEGRAM_BOT_TOKEN=replace_with_botfather_token
+MONGODB_URI=mongodb://127.0.0.1:27017
+MONGODB_DB=todo_coach_bot
+OPENAI_API_KEY=replace_with_openai_key
+OPENAI_MODEL=gpt-4o-mini
+CHECKIN_HOUR_UTC=16
+CHORES_MORNING_HOUR_UTC=8
+CHORES_CONFIRM_HOUR_UTC=20
+WEEKLY_REVIEW_DAY=sun
+WEEKLY_REVIEW_HOUR_UTC=17
+STALE_TASK_DAYS=7
+```
+
+Alternative (project-local file):
+
 ```bash
 cp .env.example .env
 ```
@@ -52,6 +83,8 @@ Edit `.env` with:
 - `TELEGRAM_BOT_TOKEN`
 - `MONGODB_URI`
 - `OPENAI_API_KEY`
+
+The app first looks for `~/.config/todo.env`. If it does not exist, it falls back to project `.env`.
 
 ## 4) Install dependencies
 
@@ -79,6 +112,7 @@ python -m bot.main
 - `/list` -> list active tasks with per-task action buttons
 - `/checkin` -> run coaching check-in now
 - `/review` -> run weekly-style review now
+- `/chores` -> show due recurring chores and confirm done
 - `/help` -> show commands
 - `/cancel` -> cancel `/add` interactive flow
 
@@ -100,7 +134,7 @@ Priority values accepted:
 Deadline values accepted:
 
 - `YYYY-MM-DD`
-- `skip` / `none` to leave empty
+- `skip` / `none` to apply default deadline (+1 month)
 
 ## Running as a systemd service
 
@@ -121,5 +155,4 @@ sudo systemctl status todo-bot
 ## Notes
 
 - If `OPENAI_API_KEY` is missing or API calls fail, the bot falls back to rule-based coaching.
-- The bot uses UTC for scheduler times (`CHECKIN_HOUR_UTC`, `WEEKLY_REVIEW_HOUR_UTC`).
-# ToDo
+- The bot uses UTC for scheduler times (`CHECKIN_HOUR_UTC`, `CHORES_MORNING_HOUR_UTC`, `CHORES_CONFIRM_HOUR_UTC`, `WEEKLY_REVIEW_HOUR_UTC`).
