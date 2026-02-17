@@ -13,8 +13,16 @@ from telegram.ext import (
     filters,
 )
 
-from bot.jobs import generate_coaching_message
-from bot.utils import ParsedAddPayload, format_deadline, parse_add_payload, parse_deadline, parse_priority, priority_to_label
+from bot.jobs import generate_coaching_message, generate_improvement_message
+from bot.utils import (
+    ParsedAddPayload,
+    format_deadline,
+    infer_project_type,
+    parse_add_payload,
+    parse_deadline,
+    parse_priority,
+    priority_to_label,
+)
 
 ADD_TITLE, ADD_PRIORITY, ADD_DEADLINE = range(3)
 HELP_TEXT = (
@@ -28,6 +36,7 @@ HELP_TEXT = (
     "/goal <text> - update main goal\n"
     "/checkin - run daily-style coaching now\n"
     "/review - run weekly-style coaching now\n"
+    "/improve - analyze your execution patterns and improvements\n"
     "/chores - view recurring weekend chores\n"
     "/cancel - cancel the /add interactive flow\n\n"
     "Priority: high/medium/low or p1/p2/p3 or 1/2/3.\n"
@@ -45,8 +54,10 @@ def _format_utc_date(value: Optional[datetime]) -> str:
 def _todo_message(todo: dict, index: int) -> str:
     todo_id = str(todo.get("_id"))
     added_date = _format_utc_date(todo.get("created_at"))
+    project_type = str(todo.get("project_type") or infer_project_type(str(todo.get("title", ""))))
     return (
         f"[{index}] {todo.get('title')}\n"
+        f"Type: {project_type}\n"
         f"Priority: {priority_to_label(int(todo.get('priority', 2)))}\n"
         f"Deadline: {format_deadline(todo.get('deadline'))}\n"
         f"Added: {added_date}\n"
@@ -328,6 +339,14 @@ async def review_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.effective_message.reply_text(message)
 
 
+async def improve_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.effective_message:
+        return
+    _ensure_user(update, context)
+    message = generate_improvement_message(context, user_id=update.effective_user.id)
+    await update.effective_message.reply_text(message)
+
+
 async def capture_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_user or not update.effective_message or not update.effective_message.text:
         return
@@ -359,6 +378,7 @@ def build_handlers() -> list:
         CommandHandler("chores", chores_command),
         CommandHandler("checkin", checkin_command),
         CommandHandler("review", review_command),
+        CommandHandler("improve", improve_command),
         CallbackQueryHandler(todo_action_callback, pattern=r"^(done|delete|chore_done):"),
         MessageHandler(filters.TEXT & ~filters.COMMAND, capture_notes),
     ]

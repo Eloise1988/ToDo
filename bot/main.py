@@ -42,6 +42,7 @@ async def _register_telegram_commands(application: Application) -> None:
             BotCommand("goal", "Show or update main goal"),
             BotCommand("checkin", "Run coaching check-in now"),
             BotCommand("review", "Run weekly-style review now"),
+            BotCommand("improve", "Analyze productivity patterns and improvements"),
             BotCommand("cancel", "Cancel current /add flow"),
         ]
     )

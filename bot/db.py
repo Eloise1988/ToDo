@@ -8,6 +8,8 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from pymongo import ASCENDING, DESCENDING, MongoClient
 
+from bot.utils import infer_project_type
+
 
 MAX_AWARE_DT = datetime(9999, 12, 31, tzinfo=timezone.utc)
 DEFAULT_WEEKEND_CHORES = (
@@ -45,6 +47,7 @@ class MongoStore:
     def _ensure_indexes(self) -> None:
         self.users.create_index([("user_id", ASCENDING)], unique=True)
         self.todos.create_index([("user_id", ASCENDING), ("status", ASCENDING), ("priority", ASCENDING)])
+        self.todos.create_index([("user_id", ASCENDING), ("status", ASCENDING), ("project_type", ASCENDING)])
         self.todos.create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])
         self.todos.create_index([("user_id", ASCENDING), ("deadline", ASCENDING)])
         self.recurring_chores.create_index([("user_id", ASCENDING), ("name", ASCENDING)], unique=True)
@@ -166,11 +169,13 @@ class MongoStore:
 
     def add_todo(self, user_id: int, title: str, priority: int, deadline: Optional[datetime]) -> dict[str, Any]:
         now = datetime.now(timezone.utc)
+        cleaned_title = title.strip()
         resolved_deadline = deadline if deadline is not None else _default_deadline_one_month(now)
         doc = {
             "user_id": user_id,
-            "title": title.strip(),
+            "title": cleaned_title,
             "priority": int(priority),
+            "project_type": infer_project_type(cleaned_title),
             "deadline": resolved_deadline,
             "status": "active",
             "created_at": now,
@@ -195,6 +200,20 @@ class MongoStore:
     def list_active_todos(self, user_id: int, limit: int = 50) -> list[dict[str, Any]]:
         todos = list(self.todos.find({"user_id": user_id, "status": "active"}))
         return self._sort_todos(todos)[:limit]
+
+    def get_recent_completed_todos(self, user_id: int, days: int = 120, limit: int = 300) -> list[dict[str, Any]]:
+        threshold = datetime.now(timezone.utc) - timedelta(days=days)
+        return list(
+            self.todos.find(
+                {
+                    "user_id": user_id,
+                    "status": "done",
+                    "completed_at": {"$gte": threshold},
+                }
+            )
+            .sort("completed_at", DESCENDING)
+            .limit(limit)
+        )
 
     def get_stale_todos(self, user_id: int, stale_days: int, limit: int = 10) -> list[dict[str, Any]]:
         threshold = datetime.now(timezone.utc) - timedelta(days=stale_days)

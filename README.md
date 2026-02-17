@@ -23,6 +23,12 @@ This project provides a Telegram bot that helps you manage tasks with priorities
   - suggests splitting tasks that remain unfinished for too long
   - flags priority misalignment with your main goal
   - suggests practical money-making moves from your recent activity context
+- Execution learning insights:
+  - detects time-to-completion patterns
+  - tracks project type tendencies
+  - estimates willingness/friction from journal updates
+  - flags priority/deadline conflicts
+  - gives concrete improvement advice via `/improve`
 
 ## Stack
 
@@ -112,6 +118,7 @@ python -m bot.main
 - `/list` -> list active tasks with per-task action buttons
 - `/checkin` -> run coaching check-in now
 - `/review` -> run weekly-style review now
+- `/improve` -> detailed pattern analysis + what to improve
 - `/chores` -> show due recurring chores and confirm done
 - `/help` -> show commands
 - `/cancel` -> cancel `/add` interactive flow

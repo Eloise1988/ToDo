@@ -12,6 +12,83 @@ PRIORITY_LABELS = {
     3: "Low",
 }
 
+PROJECT_TYPE_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "sales": (
+        "sales",
+        "sell",
+        "client",
+        "lead",
+        "prospect",
+        "close",
+        "closing",
+        "proposal",
+        "outreach",
+        "invoice",
+        "pricing",
+    ),
+    "product": (
+        "app",
+        "feature",
+        "build",
+        "code",
+        "bug",
+        "release",
+        "deploy",
+        "product",
+        "ui",
+        "api",
+    ),
+    "marketing": (
+        "marketing",
+        "content",
+        "post",
+        "campaign",
+        "ads",
+        "seo",
+        "newsletter",
+        "social",
+        "brand",
+    ),
+    "finance": (
+        "tax",
+        "taxes",
+        "budget",
+        "finance",
+        "bookkeeping",
+        "expense",
+        "bank",
+    ),
+    "ops": (
+        "admin",
+        "organize",
+        "maintenance",
+        "clean",
+        "document",
+        "process",
+        "review",
+        "planning",
+    ),
+    "learning": (
+        "learn",
+        "study",
+        "read",
+        "course",
+        "practice",
+        "research",
+        "training",
+    ),
+    "personal": (
+        "health",
+        "exercise",
+        "sleep",
+        "family",
+        "home",
+        "personal",
+        "mindset",
+        "journal",
+    ),
+}
+
 _PRIORITY_ALIASES = {
     "1": 1,
     "p1": 1,
@@ -114,3 +191,11 @@ def task_age_days(created_at: Optional[datetime]) -> int:
         return 0
     now = datetime.now(timezone.utc)
     return max(0, (now - created_at).days)
+
+
+def infer_project_type(title: str) -> str:
+    text = title.lower()
+    for project_type, keywords in PROJECT_TYPE_KEYWORDS.items():
+        if any(keyword in text for keyword in keywords):
+            return project_type
+    return "general"
