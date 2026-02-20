@@ -13,7 +13,7 @@ from telegram.ext import (
     filters,
 )
 
-from bot.jobs import generate_coaching_message, generate_improvement_message
+from bot.jobs import DAILY_REFLECTION_QUESTIONS, generate_coaching_message, generate_improvement_message
 from bot.utils import (
     ParsedAddPayload,
     format_deadline,
@@ -37,6 +37,8 @@ HELP_TEXT = (
     "/checkin - run daily-style coaching now\n"
     "/review - run weekly-style coaching now\n"
     "/improve - analyze your execution patterns and improvements\n"
+    "/reflect - ask today's reflection questions\n"
+    "/pass - skip today's pending reflection\n"
     "/chores - view recurring weekend chores\n"
     "/cancel - cancel the /add interactive flow\n\n"
     "Priority: high/medium/low or p1/p2/p3 or 1/2/3.\n"
@@ -49,6 +51,35 @@ def _format_utc_date(value: Optional[datetime]) -> str:
     if not value:
         return "n/a"
     return value.astimezone(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _get_allowed_chat_id(context: ContextTypes.DEFAULT_TYPE) -> Optional[int]:
+    settings = context.application.bot_data["settings"]
+    return settings.allowed_chat_id
+
+
+def _is_authorized_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    allowed_chat_id = _get_allowed_chat_id(context)
+    if allowed_chat_id is None:
+        return True
+    if not update.effective_chat:
+        return False
+    return update.effective_chat.id == allowed_chat_id
+
+
+async def _deny_unauthorized(update: Update) -> None:
+    if update.callback_query:
+        await update.callback_query.answer("Unauthorized chat.", show_alert=True)
+        return
+    if update.effective_message:
+        await update.effective_message.reply_text("Unauthorized chat.")
+
+
+async def _authorize_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if _is_authorized_chat(update, context):
+        return True
+    await _deny_unauthorized(update)
+    return False
 
 
 def _todo_message(todo: dict, index: int) -> str:
@@ -90,8 +121,19 @@ def _build_chore_done_keyboard(chore_id: str) -> InlineKeyboardMarkup:
     )
 
 
+def _build_reflection_prompt_text(question: str) -> str:
+    return (
+        "Daily Reflection (5 min)\n\n"
+        f"{question}\n\n"
+        "Reply with your answer. I will store it for future analysis.\n"
+        "If you're not motivated today, send /pass."
+    )
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_user or not update.effective_message:
+        return
+    if not await _authorize_chat(update, context):
         return
     _ensure_user(update, context)
     await update.effective_message.reply_text(
@@ -103,11 +145,15 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_message:
         return
+    if not await _authorize_chat(update, context):
+        return
     await update.effective_message.reply_text(HELP_TEXT)
 
 
 async def goal_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_user or not update.effective_message:
+        return
+    if not await _authorize_chat(update, context):
         return
     store = context.application.bot_data["store"]
     user_id = _ensure_user(update, context)
@@ -130,6 +176,8 @@ async def goal_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def add_entry_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not update.effective_user or not update.effective_message:
+        return ConversationHandler.END
+    if not await _authorize_chat(update, context):
         return ConversationHandler.END
     user_id = _ensure_user(update, context)
     if user_id is None:
@@ -156,6 +204,8 @@ async def add_entry_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def add_title(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not update.effective_message:
         return ConversationHandler.END
+    if not await _authorize_chat(update, context):
+        return ConversationHandler.END
     title = update.effective_message.text.strip()
     if not title:
         await update.effective_message.reply_text("Title cannot be empty. Send task title.")
@@ -168,6 +218,8 @@ async def add_title(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def add_priority(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not update.effective_message:
+        return ConversationHandler.END
+    if not await _authorize_chat(update, context):
         return ConversationHandler.END
     priority_raw = update.effective_message.text.strip()
     priority = parse_priority(priority_raw)
@@ -185,6 +237,8 @@ async def add_priority(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 async def add_deadline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not update.effective_user or not update.effective_message:
+        return ConversationHandler.END
+    if not await _authorize_chat(update, context):
         return ConversationHandler.END
     deadline_raw = update.effective_message.text.strip()
     deadline, error = parse_deadline(deadline_raw)
@@ -209,6 +263,8 @@ async def add_deadline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 
 async def add_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not await _authorize_chat(update, context):
+        return ConversationHandler.END
     if update.effective_message:
         await update.effective_message.reply_text("Add flow canceled.")
     context.user_data.pop("add_task", None)
@@ -217,6 +273,8 @@ async def add_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_user or not update.effective_message:
+        return
+    if not await _authorize_chat(update, context):
         return
     store = context.application.bot_data["store"]
     user_id = _ensure_user(update, context)
@@ -248,6 +306,8 @@ async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def chores_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_message:
+        return
+    if not await _authorize_chat(update, context):
         return
     store = context.application.bot_data["store"]
     user_id = _ensure_user(update, context)
@@ -285,6 +345,8 @@ async def chores_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def todo_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.callback_query or not update.effective_user:
+        return
+    if not await _authorize_chat(update, context):
         return
     query = update.callback_query
     await query.answer()
@@ -326,6 +388,8 @@ async def todo_action_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 async def checkin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_user or not update.effective_message:
         return
+    if not await _authorize_chat(update, context):
+        return
     _ensure_user(update, context)
     message = generate_coaching_message(context, user_id=update.effective_user.id, weekly=False)
     await update.effective_message.reply_text(message)
@@ -333,6 +397,8 @@ async def checkin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def review_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_user or not update.effective_message:
+        return
+    if not await _authorize_chat(update, context):
         return
     _ensure_user(update, context)
     message = generate_coaching_message(context, user_id=update.effective_user.id, weekly=True)
@@ -342,19 +408,125 @@ async def review_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def improve_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_user or not update.effective_message:
         return
+    if not await _authorize_chat(update, context):
+        return
     _ensure_user(update, context)
     message = generate_improvement_message(context, user_id=update.effective_user.id)
     await update.effective_message.reply_text(message)
 
 
+async def reflect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.effective_message:
+        return
+    if not await _authorize_chat(update, context):
+        return
+    store = context.application.bot_data["store"]
+    user_id = _ensure_user(update, context)
+    if user_id is None:
+        return
+
+    created_questions: list[str] = []
+    for question in DAILY_REFLECTION_QUESTIONS:
+        created = store.ensure_daily_reflection_prompt(
+            user_id=user_id,
+            question_key=question["key"],
+            question=question["text"],
+        )
+        if created:
+            created_questions.append(question["text"])
+
+    if created_questions:
+        for question_text in created_questions:
+            await update.effective_message.reply_text(_build_reflection_prompt_text(question_text))
+        return
+
+    pending = store.get_pending_reflection(user_id)
+    if pending:
+        remaining = store.count_pending_reflections(user_id=user_id)
+        suffix = f"\n\nPending reflections: {remaining}" if remaining > 1 else ""
+        await update.effective_message.reply_text(
+            _build_reflection_prompt_text(str(pending.get("question", "Who am I?"))) + suffix
+        )
+        return
+
+    await update.effective_message.reply_text("Today's reflection questions are already answered or skipped.")
+
+
+async def pass_reflection_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.effective_message:
+        return
+    if not await _authorize_chat(update, context):
+        return
+    store = context.application.bot_data["store"]
+    user_id = _ensure_user(update, context)
+    if user_id is None:
+        return
+
+    pending = store.get_pending_reflection(user_id=user_id)
+    if not pending:
+        await update.effective_message.reply_text("No pending reflection to skip right now.")
+        return
+
+    if store.pass_pending_reflection(user_id=user_id, skip_note="pass_command"):
+        question = str(pending.get("question", "Reflection question"))
+        remaining = store.count_pending_reflections(user_id=user_id)
+        await update.effective_message.reply_text(f"Skipped: {question}")
+        if remaining > 0:
+            next_pending = store.get_pending_reflection(user_id=user_id)
+            if next_pending:
+                await update.effective_message.reply_text(
+                    _build_reflection_prompt_text(str(next_pending.get("question", "Who am I?")))
+                    + f"\n\nPending reflections: {remaining}"
+                )
+        return
+    await update.effective_message.reply_text("Could not skip reflection right now.")
+
+
 async def capture_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_user or not update.effective_message or not update.effective_message.text:
+        return
+    if not await _authorize_chat(update, context):
         return
     text = update.effective_message.text.strip()
     if not text:
         return
     store = context.application.bot_data["store"]
-    store.add_journal_entry(user_id=update.effective_user.id, text=text, source="chat")
+    user_id = update.effective_user.id
+    pending_before = store.get_pending_reflection(user_id=user_id)
+
+    lowered = text.lower()
+    if lowered in {"pass", "skip", "/pass"}:
+        if store.pass_pending_reflection(user_id=user_id, skip_note=lowered):
+            remaining = store.count_pending_reflections(user_id=user_id)
+            await update.effective_message.reply_text("Reflection skipped for today.")
+            if remaining > 0:
+                next_pending = store.get_pending_reflection(user_id=user_id)
+                if next_pending:
+                    await update.effective_message.reply_text(
+                        _build_reflection_prompt_text(str(next_pending.get("question", "Who am I?")))
+                        + f"\n\nPending reflections: {remaining}"
+                    )
+            return
+
+    if store.save_pending_reflection_answer(user_id=user_id, answer=text):
+        question_text = str((pending_before or {}).get("question") or "Reflection")
+        store.add_journal_entry(
+            user_id=user_id,
+            text=f"{question_text} -> {text}",
+            source="reflection",
+        )
+        remaining = store.count_pending_reflections(user_id=user_id)
+        await update.effective_message.reply_text("Saved your daily reflection.")
+        if remaining > 0:
+            next_pending = store.get_pending_reflection(user_id=user_id)
+            if next_pending:
+                await update.effective_message.reply_text(
+                    _build_reflection_prompt_text(str(next_pending.get("question", "Who am I?")))
+                    + f"\n\nPending reflections: {remaining}"
+                )
+        return
+
+    store.add_journal_entry(user_id=user_id, text=text, source="chat")
 
 
 def build_handlers() -> list:
@@ -379,6 +551,8 @@ def build_handlers() -> list:
         CommandHandler("checkin", checkin_command),
         CommandHandler("review", review_command),
         CommandHandler("improve", improve_command),
+        CommandHandler("reflect", reflect_command),
+        CommandHandler("pass", pass_reflection_command),
         CallbackQueryHandler(todo_action_callback, pattern=r"^(done|delete|chore_done):"),
         MessageHandler(filters.TEXT & ~filters.COMMAND, capture_notes),
     ]

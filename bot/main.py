@@ -10,7 +10,13 @@ from bot.ai import AICoach
 from bot.config import load_settings
 from bot.db import MongoStore
 from bot.handlers import build_handlers
-from bot.jobs import chores_eod_confirmation_job, chores_morning_job, daily_checkin_job, weekly_review_job
+from bot.jobs import (
+    chores_eod_confirmation_job,
+    chores_morning_job,
+    daily_checkin_job,
+    daily_reflection_question_job,
+    weekly_review_job,
+)
 
 
 logging.basicConfig(
@@ -43,6 +49,8 @@ async def _register_telegram_commands(application: Application) -> None:
             BotCommand("checkin", "Run coaching check-in now"),
             BotCommand("review", "Run weekly-style review now"),
             BotCommand("improve", "Analyze productivity patterns and improvements"),
+            BotCommand("reflect", "Ask today's reflection questions"),
+            BotCommand("pass", "Skip today's pending reflection"),
             BotCommand("cancel", "Cancel current /add flow"),
         ]
     )
@@ -72,6 +80,12 @@ def main() -> None:
         callback=daily_checkin_job,
         time=checkin_time,
         name="daily-checkin",
+    )
+    reflection_time = time(hour=settings.reflection_hour_utc, minute=0, tzinfo=timezone.utc)
+    application.job_queue.run_daily(
+        callback=daily_reflection_question_job,
+        time=reflection_time,
+        name="daily-reflection",
     )
     chores_morning_time = time(hour=settings.chores_morning_hour_utc, minute=0, tzinfo=timezone.utc)
     application.job_queue.run_daily(

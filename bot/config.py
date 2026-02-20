@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -13,11 +14,13 @@ _VALID_DAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
 @dataclass(frozen=True)
 class Settings:
     telegram_bot_token: str
+    allowed_chat_id: Optional[int]
     mongodb_uri: str
     mongodb_db: str
     openai_api_key: str
     openai_model: str
     checkin_hour_utc: int
+    reflection_hour_utc: int
     chores_morning_hour_utc: int
     chores_confirm_hour_utc: int
     weekly_review_day: str
@@ -36,6 +39,16 @@ def _int_env(name: str, default: int, minimum: int, maximum: int) -> int:
     return value
 
 
+def _optional_int_env(name: str) -> Optional[int]:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer when provided. Got: {raw!r}") from exc
+
+
 def load_settings() -> Settings:
     custom_env = Path(os.getenv("TODO_ENV_FILE", "~/.config/todo.env")).expanduser()
     if custom_env.is_file():
@@ -46,6 +59,7 @@ def load_settings() -> Settings:
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not telegram_bot_token:
         raise ValueError("TELEGRAM_BOT_TOKEN is required.")
+    allowed_chat_id = _optional_int_env("ALLOWED_CHAT_ID")
 
     mongodb_uri = os.getenv("MONGODB_URI", "mongodb://127.0.0.1:27017").strip()
     mongodb_db = os.getenv("MONGODB_DB", "todo_coach_bot").strip()
@@ -54,6 +68,7 @@ def load_settings() -> Settings:
     openai_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
 
     checkin_hour_utc = _int_env("CHECKIN_HOUR_UTC", 16, 0, 23)
+    reflection_hour_utc = _int_env("REFLECTION_HOUR_UTC", 9, 0, 23)
     chores_morning_hour_utc = _int_env("CHORES_MORNING_HOUR_UTC", 8, 0, 23)
     chores_confirm_hour_utc = _int_env("CHORES_CONFIRM_HOUR_UTC", 20, 0, 23)
     weekly_review_day = os.getenv("WEEKLY_REVIEW_DAY", "sun").strip().lower()
@@ -64,11 +79,13 @@ def load_settings() -> Settings:
 
     return Settings(
         telegram_bot_token=telegram_bot_token,
+        allowed_chat_id=allowed_chat_id,
         mongodb_uri=mongodb_uri,
         mongodb_db=mongodb_db,
         openai_api_key=openai_api_key,
         openai_model=openai_model,
         checkin_hour_utc=checkin_hour_utc,
+        reflection_hour_utc=reflection_hour_utc,
         chores_morning_hour_utc=chores_morning_hour_utc,
         chores_confirm_hour_utc=chores_confirm_hour_utc,
         weekly_review_day=weekly_review_day,

@@ -38,6 +38,7 @@ class MongoStore:
         self.users = self.db.users
         self.todos = self.db.todos
         self.recurring_chores = self.db.recurring_chores
+        self.daily_reflections = self.db.daily_reflections
         self.journal_entries = self.db.journal_entries
         self._ensure_indexes()
 
@@ -52,6 +53,18 @@ class MongoStore:
         self.todos.create_index([("user_id", ASCENDING), ("deadline", ASCENDING)])
         self.recurring_chores.create_index([("user_id", ASCENDING), ("name", ASCENDING)], unique=True)
         self.recurring_chores.create_index([("user_id", ASCENDING), ("next_due_date", ASCENDING)])
+        # Migrate from single-question-per-day index to per-question-per-day index.
+        for index in self.daily_reflections.list_indexes():
+            keys = index.get("key", {})
+            if list(keys.items()) == [("user_id", 1), ("asked_for_date", 1)] and index.get("unique"):
+                self.daily_reflections.drop_index(index["name"])
+                break
+        self.daily_reflections.create_index(
+            [("user_id", ASCENDING), ("asked_for_date", ASCENDING), ("question_key", ASCENDING)],
+            unique=True,
+        )
+        self.daily_reflections.create_index([("user_id", ASCENDING), ("asked_at", DESCENDING)])
+        self.daily_reflections.create_index([("user_id", ASCENDING), ("answered_at", DESCENDING)])
         self.journal_entries.create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])
 
     def upsert_user(self, user_id: int, username: str, first_name: str) -> dict[str, Any]:
@@ -126,6 +139,121 @@ class MongoStore:
                 [("next_due_date", ASCENDING), ("name", ASCENDING)]
             ).limit(limit)
         )
+
+    def ensure_daily_reflection_prompt(
+        self,
+        user_id: int,
+        question_key: str,
+        question: str,
+        asked_at: Optional[datetime] = None,
+    ) -> bool:
+        now = asked_at or datetime.now(timezone.utc)
+        date_key = now.date().isoformat()
+        result = self.daily_reflections.update_one(
+            {
+                "user_id": user_id,
+                "asked_for_date": date_key,
+                "question_key": question_key,
+            },
+            {
+                "$setOnInsert": {
+                    "user_id": user_id,
+                    "question_key": question_key,
+                    "question": question.strip(),
+                    "asked_for_date": date_key,
+                    "asked_at": now,
+                    "answer": None,
+                    "answered_at": None,
+                    "skipped": False,
+                    "skipped_at": None,
+                    "skip_note": None,
+                }
+            },
+            upsert=True,
+        )
+        return result.upserted_id is not None
+
+    def get_pending_reflections(self, user_id: int, limit: int = 5) -> list[dict[str, Any]]:
+        return list(
+            self.daily_reflections.find(
+                {
+                    "user_id": user_id,
+                    "answer": None,
+                    "skipped": {"$ne": True},
+                }
+            )
+            .sort([("asked_at", ASCENDING), ("question_key", ASCENDING)])
+            .limit(limit)
+        )
+
+    def get_pending_reflection(self, user_id: int) -> Optional[dict[str, Any]]:
+        pending = self.get_pending_reflections(user_id=user_id, limit=1)
+        return pending[0] if pending else None
+
+    def save_pending_reflection_answer(self, user_id: int, answer: str) -> bool:
+        pending = self.get_pending_reflection(user_id)
+        if not pending:
+            return False
+
+        cleaned = " ".join(answer.split())
+        if not cleaned:
+            return False
+
+        result = self.daily_reflections.update_one(
+            {"_id": pending["_id"], "user_id": user_id, "answer": None},
+            {
+                "$set": {
+                    "answer": cleaned[:4000],
+                    "answered_at": datetime.now(timezone.utc),
+                    "skipped": False,
+                    "skipped_at": None,
+                    "skip_note": None,
+                }
+            },
+        )
+        return result.modified_count == 1
+
+    def pass_pending_reflection(self, user_id: int, skip_note: str = "pass") -> bool:
+        pending = self.get_pending_reflection(user_id)
+        if not pending:
+            return False
+
+        result = self.daily_reflections.update_one(
+            {"_id": pending["_id"], "user_id": user_id, "answer": None},
+            {
+                "$set": {
+                    "answer": "",
+                    "answered_at": datetime.now(timezone.utc),
+                    "skipped": True,
+                    "skipped_at": datetime.now(timezone.utc),
+                    "skip_note": skip_note[:120],
+                }
+            },
+        )
+        return result.modified_count == 1
+
+    def count_pending_reflections(self, user_id: int) -> int:
+        return self.daily_reflections.count_documents(
+            {
+                "user_id": user_id,
+                "answer": None,
+                "skipped": {"$ne": True},
+            }
+        )
+
+    def get_recent_reflection_answers(self, user_id: int, limit: int = 12) -> list[str]:
+        return [
+            entry["answer"]
+            for entry in self.daily_reflections.find(
+                {
+                    "user_id": user_id,
+                    "answer": {"$nin": [None, ""]},
+                    "skipped": {"$ne": True},
+                }
+            )
+            .sort("answered_at", DESCENDING)
+            .limit(limit)
+        ]
 
     def list_due_chores(self, user_id: int, on_date: Optional[date] = None, limit: int = 25) -> list[dict[str, Any]]:
         day = on_date or datetime.now(timezone.utc).date()

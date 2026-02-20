@@ -20,6 +20,16 @@ from bot.prompts import (
 
 logger = logging.getLogger(__name__)
 WEEKEND_DAYS = {5, 6}  # Saturday, Sunday
+DAILY_REFLECTION_QUESTIONS = (
+    {
+        "key": "who_am_i",
+        "text": "Answer the question on a daily basis for 5 min: Who am I?",
+    },
+    {
+        "key": "lower_expectations",
+        "text": "Need to work on lowering expectations so that I am happier.",
+    },
+)
 _MOMENTUM_WORDS = {
     "done",
     "completed",
@@ -85,10 +95,12 @@ def generate_coaching_message(context: ContextTypes.DEFAULT_TYPE, user_id: int, 
     overdue_todos = store.get_overdue_todos(user_id, limit=10)
     stats = store.get_stats(user_id)
     recent_notes = store.get_recent_journal_entries(user_id, limit=10)
+    recent_reflections = store.get_recent_reflection_answers(user_id, limit=8)
     learning_profile = _build_learning_profile(
         active_todos=active_todos,
         completed_todos=completed_todos,
         recent_notes=recent_notes,
+        recent_reflections=recent_reflections,
         stale_todos=stale_todos,
         overdue_todos=overdue_todos,
     )
@@ -100,6 +112,7 @@ def generate_coaching_message(context: ContextTypes.DEFAULT_TYPE, user_id: int, 
         overdue_todos=overdue_todos,
         stats=stats,
         recent_notes=recent_notes,
+        recent_reflections=recent_reflections,
         learning_profile=learning_profile,
         stale_days=settings.stale_task_days,
         weekly=weekly,
@@ -130,10 +143,12 @@ def generate_improvement_message(context: ContextTypes.DEFAULT_TYPE, user_id: in
     stale_todos = store.get_stale_todos(user_id, stale_days=7, limit=20)
     overdue_todos = store.get_overdue_todos(user_id, limit=20)
     recent_notes = store.get_recent_journal_entries(user_id, limit=20)
+    recent_reflections = store.get_recent_reflection_answers(user_id, limit=12)
     learning_profile = _build_learning_profile(
         active_todos=active_todos,
         completed_todos=completed_todos,
         recent_notes=recent_notes,
+        recent_reflections=recent_reflections,
         stale_todos=stale_todos,
         overdue_todos=overdue_todos,
     )
@@ -142,6 +157,7 @@ def generate_improvement_message(context: ContextTypes.DEFAULT_TYPE, user_id: in
         main_goal=main_goal,
         active_todos=active_todos,
         recent_notes=recent_notes,
+        recent_reflections=recent_reflections,
         learning_profile=learning_profile,
     )
     ai_message = ai.generate(COACH_SYSTEM_PROMPT, prompt)
@@ -157,8 +173,7 @@ def generate_improvement_message(context: ContextTypes.DEFAULT_TYPE, user_id: in
 
 
 async def daily_checkin_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    store = context.application.bot_data["store"]
-    for user_id in store.list_user_ids():
+    for user_id in _target_user_ids(context):
         try:
             message = generate_coaching_message(context, user_id=user_id, weekly=False)
             await context.bot.send_message(
@@ -170,8 +185,7 @@ async def daily_checkin_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def weekly_review_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    store = context.application.bot_data["store"]
-    for user_id in store.list_user_ids():
+    for user_id in _target_user_ids(context):
         try:
             message = generate_coaching_message(context, user_id=user_id, weekly=True)
             await context.bot.send_message(
@@ -200,6 +214,7 @@ def _build_learning_profile(
     active_todos: list[dict[str, Any]],
     completed_todos: list[dict[str, Any]],
     recent_notes: list[str],
+    recent_reflections: list[str],
     stale_todos: list[dict[str, Any]],
     overdue_todos: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -238,7 +253,9 @@ def _build_learning_profile(
     if due_soon >= 5:
         conflict_flags.append(f"deadline cluster in next 7 days ({due_soon} tasks)")
 
-    momentum_signals, resistance_signals, willingness_score = _estimate_willingness(recent_notes)
+    momentum_signals, resistance_signals, willingness_score = _estimate_willingness(
+        recent_notes + recent_reflections
+    )
     money_ratio = _money_aligned_ratio(active_todos)
 
     project_type_breakdown_lines = []
@@ -354,6 +371,14 @@ def _normalize_coaching_output(text: str) -> str:
     return "\n".join(normalized).strip()
 
 
+def _target_user_ids(context: ContextTypes.DEFAULT_TYPE) -> list[int]:
+    store = context.application.bot_data["store"]
+    settings = context.application.bot_data["settings"]
+    if settings.allowed_chat_id is not None:
+        return [settings.allowed_chat_id]
+    return store.list_user_ids()
+
+
 def _build_due_chore_keyboard(due_chores: list[dict]) -> InlineKeyboardMarkup:
     rows = []
     for chore in due_chores:
@@ -367,7 +392,7 @@ async def chores_morning_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     if now.weekday() not in WEEKEND_DAYS:
         return
 
-    for user_id in store.list_user_ids():
+    for user_id in _target_user_ids(context):
         try:
             store.ensure_default_chores(user_id)
             due_chores = store.list_due_chores(user_id=user_id, on_date=now.date())
@@ -393,7 +418,7 @@ async def chores_eod_confirmation_job(context: ContextTypes.DEFAULT_TYPE) -> Non
     if now.weekday() not in WEEKEND_DAYS:
         return
 
-    for user_id in store.list_user_ids():
+    for user_id in _target_user_ids(context):
         try:
             store.ensure_default_chores(user_id)
             due_chores = store.list_due_chores(user_id=user_id, on_date=now.date())
@@ -412,3 +437,32 @@ async def chores_eod_confirmation_job(context: ContextTypes.DEFAULT_TYPE) -> Non
             )
         except Exception as exc:  # pragma: no cover
             logger.warning("EOD chores confirmation failed for user %s: %s", user_id, exc)
+
+
+async def daily_reflection_question_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    store = context.application.bot_data["store"]
+    now = datetime.now(timezone.utc)
+
+    for user_id in _target_user_ids(context):
+        try:
+            for question in DAILY_REFLECTION_QUESTIONS:
+                created = store.ensure_daily_reflection_prompt(
+                    user_id=user_id,
+                    question_key=question["key"],
+                    question=question["text"],
+                    asked_at=now,
+                )
+                if not created:
+                    continue
+
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=(
+                        "Daily Reflection (5 min)\n\n"
+                        f"{question['text']}\n\n"
+                        "Reply with your answer. I will store it for future analysis.\n"
+                        "If you're not motivated today, send /pass."
+                    ),
+                )
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Daily reflection prompt failed for user %s: %s", user_id, exc)

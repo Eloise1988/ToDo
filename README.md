@@ -9,6 +9,12 @@ This project provides a Telegram bot that helps you manage tasks with priorities
   - mark as done
   - delete
 - Daily automated check-ins.
+- Daily reflection prompt:
+  - asks daily:
+    - "Who am I?" (5-minute reflection)
+    - "Need to work on lowering expectations so that I am happier."
+  - stores your answer in MongoDB for future analysis/coaching
+  - supports skip days via `/pass` (or `pass` / `skip`)
 - Recurring weekend chores with confirmation flow:
   - Clean bedroom and bathroom every 30 days
   - Clean sheets every 21 days
@@ -29,6 +35,7 @@ This project provides a Telegram bot that helps you manage tasks with priorities
   - estimates willingness/friction from journal updates
   - flags priority/deadline conflicts
   - gives concrete improvement advice via `/improve`
+- Optional bot access lock to your Telegram chat only (`ALLOWED_CHAT_ID`)
 
 ## Stack
 
@@ -66,11 +73,13 @@ Paste this template and fill real values:
 
 ```env
 TELEGRAM_BOT_TOKEN=replace_with_botfather_token
+ALLOWED_CHAT_ID=
 MONGODB_URI=mongodb://127.0.0.1:27017
 MONGODB_DB=todo_coach_bot
 OPENAI_API_KEY=replace_with_openai_key
 OPENAI_MODEL=gpt-4o-mini
 CHECKIN_HOUR_UTC=16
+REFLECTION_HOUR_UTC=9
 CHORES_MORNING_HOUR_UTC=8
 CHORES_CONFIRM_HOUR_UTC=20
 WEEKLY_REVIEW_DAY=sun
@@ -119,6 +128,8 @@ python -m bot.main
 - `/checkin` -> run coaching check-in now
 - `/review` -> run weekly-style review now
 - `/improve` -> detailed pattern analysis + what to improve
+- `/reflect` -> ask today's reflection questions now
+- `/pass` -> skip the next pending reflection question
 - `/chores` -> show due recurring chores and confirm done
 - `/help` -> show commands
 - `/cancel` -> cancel `/add` interactive flow
@@ -131,6 +142,7 @@ python -m bot.main
   - blockers
   - what you did today
 - The coaching prompt uses these notes plus your tasks to improve split-task suggestions and money-focused ideas.
+- Reflection answers are also stored and reused in analysis prompts.
 
 Priority values accepted:
 
@@ -162,4 +174,5 @@ sudo systemctl status todo-bot
 ## Notes
 
 - If `OPENAI_API_KEY` is missing or API calls fail, the bot falls back to rule-based coaching.
-- The bot uses UTC for scheduler times (`CHECKIN_HOUR_UTC`, `CHORES_MORNING_HOUR_UTC`, `CHORES_CONFIRM_HOUR_UTC`, `WEEKLY_REVIEW_HOUR_UTC`).
+- Set `ALLOWED_CHAT_ID` to lock the bot to one Telegram chat/user.
+- The bot uses UTC for scheduler times (`CHECKIN_HOUR_UTC`, `REFLECTION_HOUR_UTC`, `CHORES_MORNING_HOUR_UTC`, `CHORES_CONFIRM_HOUR_UTC`, `WEEKLY_REVIEW_HOUR_UTC`).

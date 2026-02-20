@@ -81,12 +81,16 @@ def build_checkin_prompt(
     overdue_todos: list[dict[str, Any]],
     stats: dict[str, int],
     recent_notes: list[str],
+    recent_reflections: list[str],
     learning_profile: dict[str, Any],
     stale_days: int,
     weekly: bool,
 ) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     notes_blob = "\n".join(f"- {note}" for note in recent_notes[:10]) if recent_notes else "- (none)"
+    reflections_blob = (
+        "\n".join(f"- {answer}" for answer in recent_reflections[:6]) if recent_reflections else "- (none)"
+    )
     cadence = "weekly review" if weekly else "daily check-in"
     return f"""Time: {now}
 Cadence: {cadence}
@@ -110,6 +114,9 @@ Stale todos (age >= {stale_days} days):
 
 Recent journal notes:
 {notes_blob}
+
+Recent "Who am I?" reflections:
+{reflections_blob}
 
 Execution learning profile:
 {_format_learning_profile(learning_profile)}
@@ -186,10 +193,14 @@ def build_improvement_prompt(
     main_goal: str,
     active_todos: list[dict[str, Any]],
     recent_notes: list[str],
+    recent_reflections: list[str],
     learning_profile: dict[str, Any],
 ) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     notes_blob = "\n".join(f"- {note}" for note in recent_notes[:12]) if recent_notes else "- (none)"
+    reflections_blob = (
+        "\n".join(f"- {answer}" for answer in recent_reflections[:10]) if recent_reflections else "- (none)"
+    )
     return f"""Time: {now}
 Main goal: {main_goal}
 
@@ -198,6 +209,9 @@ Active todos:
 
 Recent journal notes:
 {notes_blob}
+
+Recent "Who am I?" reflections:
+{reflections_blob}
 
 Execution learning profile:
 {_format_learning_profile(learning_profile)}
