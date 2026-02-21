@@ -16,11 +16,14 @@ This project provides a Telegram bot that helps you manage tasks with priorities
   - stores your answer in MongoDB for future analysis/coaching
   - supports skip days via `/pass` (or `pass` / `skip`)
 - Recurring weekend chores with confirmation flow:
-  - Clean bedroom and bathroom every 30 days
-  - Clean sheets every 21 days
   - Water plants every 7 days
+  - Clean sheets every 21 days
+  - Clean bedroom every 30 days
+  - Clean bathroom every 30 days
+  - Each chore is asked separately with actions: Done / Not done / Pass weekend
   - Morning weekend reminders + end-of-day confirmation prompt
-  - If not confirmed done, chores keep showing on weekend days
+  - If not done, chores keep showing on weekend days
+  - If passed for weekend, they come back next weekend
 - Weekly review nudges inspired by:
   - *Getting Things Done* (capture + next actions + review)
   - *7 Habits* (goal alignment + important/not urgent)
@@ -130,7 +133,7 @@ python -m bot.main
 - `/improve` -> detailed pattern analysis + what to improve
 - `/reflect` -> ask today's reflection questions now
 - `/pass` -> skip the next pending reflection question
-- `/chores` -> show due recurring chores and confirm done
+- `/chores` -> show due recurring chores and answer each one (done / not done / pass weekend)
 - `/help` -> show commands
 - `/cancel` -> cancel `/add` interactive flow
 

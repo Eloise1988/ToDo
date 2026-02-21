@@ -12,10 +12,11 @@ from bot.utils import infer_project_type
 
 
 MAX_AWARE_DT = datetime(9999, 12, 31, tzinfo=timezone.utc)
+LEGACY_COMBINED_CHORE_NAME = "Clean bedroom and bathroom"
 DEFAULT_WEEKEND_CHORES = (
     {
-        "name": "Clean bedroom and bathroom",
-        "interval_days": 30,
+        "name": "Water plants",
+        "interval_days": 7,
         "preferred_weekday": 5,  # Saturday
     },
     {
@@ -24,8 +25,13 @@ DEFAULT_WEEKEND_CHORES = (
         "preferred_weekday": 5,  # Saturday
     },
     {
-        "name": "Water plants",
-        "interval_days": 7,
+        "name": "Clean bedroom",
+        "interval_days": 30,
+        "preferred_weekday": 5,  # Saturday
+    },
+    {
+        "name": "Clean bathroom",
+        "interval_days": 30,
         "preferred_weekday": 5,  # Saturday
     },
 )
@@ -111,11 +117,19 @@ class MongoStore:
     def ensure_default_chores(self, user_id: int) -> None:
         now = datetime.now(timezone.utc)
         today = now.date()
+        legacy = self.recurring_chores.find_one({"user_id": user_id, "name": LEGACY_COMBINED_CHORE_NAME})
+        legacy_next_due = legacy.get("next_due_date") if legacy else None
+        legacy_last_completed = legacy.get("last_completed_at") if legacy else None
+        if legacy:
+            self.recurring_chores.delete_one({"_id": legacy["_id"], "user_id": user_id})
+
         for chore in DEFAULT_WEEKEND_CHORES:
             name = chore["name"]
             interval_days = int(chore["interval_days"])
             preferred_weekday = int(chore["preferred_weekday"])
             first_due_date = _next_weekday_on_or_after(today, preferred_weekday)
+            default_next_due = _at_start_of_day_utc(first_due_date)
+            next_due_seed = legacy_next_due if isinstance(legacy_next_due, datetime) else default_next_due
             self.recurring_chores.update_one(
                 {"user_id": user_id, "name": name},
                 {
@@ -124,10 +138,10 @@ class MongoStore:
                         "name": name,
                         "interval_days": interval_days,
                         "preferred_weekday": preferred_weekday,
-                        "next_due_date": _at_start_of_day_utc(first_due_date),
+                        "next_due_date": next_due_seed,
                         "created_at": now,
                         "updated_at": now,
-                        "last_completed_at": None,
+                        "last_completed_at": legacy_last_completed,
                     },
                 },
                 upsert=True,
@@ -288,6 +302,32 @@ class MongoStore:
             {
                 "$set": {
                     "last_completed_at": now,
+                    "next_due_date": _at_start_of_day_utc(next_due_date),
+                    "updated_at": now,
+                }
+            },
+        )
+        return self.recurring_chores.find_one({"_id": object_id, "user_id": user_id})
+
+    def postpone_chore_to_next_weekend(
+        self, user_id: int, chore_id: str, passed_at: Optional[datetime] = None
+    ) -> Optional[dict[str, Any]]:
+        object_id = _safe_object_id(chore_id)
+        if not object_id:
+            return None
+
+        chore = self.recurring_chores.find_one({"_id": object_id, "user_id": user_id})
+        if not chore:
+            return None
+
+        now = passed_at or datetime.now(timezone.utc)
+        preferred_weekday = int(chore.get("preferred_weekday", 5))
+        next_due_date = _next_weekday_on_or_after(now.date() + timedelta(days=1), preferred_weekday)
+
+        self.recurring_chores.update_one(
+            {"_id": object_id, "user_id": user_id},
+            {
+                "$set": {
                     "next_due_date": _at_start_of_day_utc(next_due_date),
                     "updated_at": now,
                 }

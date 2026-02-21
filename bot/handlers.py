@@ -39,7 +39,7 @@ HELP_TEXT = (
     "/improve - analyze your execution patterns and improvements\n"
     "/reflect - ask today's reflection questions\n"
     "/pass - skip today's pending reflection\n"
-    "/chores - view recurring weekend chores\n"
+    "/chores - view recurring weekend chores and confirm each one\n"
     "/cancel - cancel the /add interactive flow\n\n"
     "Priority: high/medium/low or p1/p2/p3 or 1/2/3.\n"
     "Deadline: YYYY-MM-DD, or skip/none (defaults to +1 month).\n"
@@ -115,9 +115,15 @@ def _ensure_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Optional
     return user.id
 
 
-def _build_chore_done_keyboard(chore_id: str) -> InlineKeyboardMarkup:
+def _build_chore_action_keyboard(chore_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("Done", callback_data=f"chore_done:{chore_id}")]]
+        [
+            [
+                InlineKeyboardButton("Done", callback_data=f"chore_done:{chore_id}"),
+                InlineKeyboardButton("Not done", callback_data=f"chore_not_done:{chore_id}"),
+            ],
+            [InlineKeyboardButton("Pass weekend", callback_data=f"chore_pass_weekend:{chore_id}")],
+        ]
     )
 
 
@@ -317,15 +323,15 @@ async def chores_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     due_chores = store.list_due_chores(user_id=user_id)
     if due_chores:
         await update.effective_message.reply_text(
-            "Weekend chores pending confirmation. Mark each one when done:"
+            "Weekend chore reminder\n\nConfirm each chore one by one:"
         )
         for chore in due_chores:
             chore_id = str(chore.get("_id"))
             name = chore.get("name", "")
             next_due = _format_utc_date(chore.get("next_due_date"))
             await update.effective_message.reply_text(
-                f"{name}\nDue since: {next_due}",
-                reply_markup=_build_chore_done_keyboard(chore_id),
+                f"{name}\nDue since: {next_due}\n\nDone today?",
+                reply_markup=_build_chore_action_keyboard(chore_id),
             )
         return
 
@@ -381,6 +387,23 @@ async def todo_action_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         if updated:
             next_due = _format_utc_date(updated.get("next_due_date"))
             await query.edit_message_text(f"{query.message.text}\n\nStatus: confirmed done. Next due: {next_due}.")
+        else:
+            await query.edit_message_text(f"{query.message.text}\n\nStatus: not found/already updated.")
+        return
+
+    if action == "chore_not_done":
+        await query.edit_message_text(
+            f"{query.message.text}\n\nStatus: not done. I will keep reminding you on weekend days."
+        )
+        return
+
+    if action == "chore_pass_weekend":
+        updated = store.postpone_chore_to_next_weekend(user_id=user_id, chore_id=todo_id)
+        if updated:
+            next_due = _format_utc_date(updated.get("next_due_date"))
+            await query.edit_message_text(
+                f"{query.message.text}\n\nStatus: passed for this weekend. It will come back next weekend ({next_due})."
+            )
         else:
             await query.edit_message_text(f"{query.message.text}\n\nStatus: not found/already updated.")
 
@@ -553,6 +576,9 @@ def build_handlers() -> list:
         CommandHandler("improve", improve_command),
         CommandHandler("reflect", reflect_command),
         CommandHandler("pass", pass_reflection_command),
-        CallbackQueryHandler(todo_action_callback, pattern=r"^(done|delete|chore_done):"),
+        CallbackQueryHandler(
+            todo_action_callback,
+            pattern=r"^(done|delete|chore_done|chore_not_done|chore_pass_weekend):",
+        ),
         MessageHandler(filters.TEXT & ~filters.COMMAND, capture_notes),
     ]

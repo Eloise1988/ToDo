@@ -196,19 +196,6 @@ async def weekly_review_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             logger.warning("Weekly review failed for user %s: %s", user_id, exc)
 
 
-def _format_due_rows(due_chores: list[dict]) -> str:
-    lines: list[str] = []
-    for chore in due_chores:
-        name = chore.get("name", "")
-        next_due = chore.get("next_due_date")
-        if next_due:
-            due_day = next_due.astimezone(timezone.utc).strftime("%Y-%m-%d")
-        else:
-            due_day = "n/a"
-        lines.append(f"- {name} (due since {due_day})")
-    return "\n".join(lines)
-
-
 def _build_learning_profile(
     *,
     active_todos: list[dict[str, Any]],
@@ -379,11 +366,16 @@ def _target_user_ids(context: ContextTypes.DEFAULT_TYPE) -> list[int]:
     return store.list_user_ids()
 
 
-def _build_due_chore_keyboard(due_chores: list[dict]) -> InlineKeyboardMarkup:
-    rows = []
-    for chore in due_chores:
-        rows.append([InlineKeyboardButton(f"Done: {chore.get('name', '')}", callback_data=f"chore_done:{chore.get('_id')}")])
-    return InlineKeyboardMarkup(rows)
+def _build_chore_action_keyboard(chore_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("Done", callback_data=f"chore_done:{chore_id}"),
+                InlineKeyboardButton("Not done", callback_data=f"chore_not_done:{chore_id}"),
+            ],
+            [InlineKeyboardButton("Pass weekend", callback_data=f"chore_pass_weekend:{chore_id}")],
+        ]
+    )
 
 
 async def chores_morning_job(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -403,11 +395,21 @@ async def chores_morning_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                 chat_id=user_id,
                 text=(
                     "Weekend chore reminder (morning)\n\n"
-                    "Please complete and confirm these tasks today:\n"
-                    f"{_format_due_rows(due_chores)}"
+                    "Please answer each chore one by one."
                 ),
-                reply_markup=_build_due_chore_keyboard(due_chores),
             )
+            for chore in due_chores:
+                chore_id = str(chore.get("_id"))
+                name = str(chore.get("name", ""))
+                due_day = "n/a"
+                next_due = chore.get("next_due_date")
+                if next_due:
+                    due_day = next_due.astimezone(timezone.utc).strftime("%Y-%m-%d")
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=f"{name}\nDue since: {due_day}\n\nDone today?",
+                    reply_markup=_build_chore_action_keyboard(chore_id),
+                )
         except Exception as exc:  # pragma: no cover
             logger.warning("Morning chores reminder failed for user %s: %s", user_id, exc)
 
@@ -429,12 +431,22 @@ async def chores_eod_confirmation_job(context: ContextTypes.DEFAULT_TYPE) -> Non
                 chat_id=user_id,
                 text=(
                     "End-of-day chore confirmation\n\n"
-                    "Please confirm what is done before the day ends.\n"
-                    "Anything not confirmed stays in weekend reminders.\n"
-                    f"{_format_due_rows(due_chores)}"
+                    "Please confirm each chore.\n"
+                    "Anything not done stays in weekend reminders."
                 ),
-                reply_markup=_build_due_chore_keyboard(due_chores),
             )
+            for chore in due_chores:
+                chore_id = str(chore.get("_id"))
+                name = str(chore.get("name", ""))
+                due_day = "n/a"
+                next_due = chore.get("next_due_date")
+                if next_due:
+                    due_day = next_due.astimezone(timezone.utc).strftime("%Y-%m-%d")
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=f"{name}\nDue since: {due_day}\n\nDone today?",
+                    reply_markup=_build_chore_action_keyboard(chore_id),
+                )
         except Exception as exc:  # pragma: no cover
             logger.warning("EOD chores confirmation failed for user %s: %s", user_id, exc)
 
